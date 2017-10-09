@@ -4,9 +4,12 @@ from json import dumps
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
+#Connect to mongo
 client = MongoClient()
+#Select db message_service
 db = client.message_service
 
+#Request parser for post route
 post_parser = reqparse.RequestParser()
 post_parser.add_argument(
     'sender', required=True,
@@ -21,12 +24,7 @@ post_parser.add_argument(
     help='The text message'
 )
 
-get_parser = reqparse.RequestParser()
-get_parser.add_argument(
-    'reciever', required=True,
-    help='The sender\'s username'
-)
-
+#Request parser for get route
 get_parser = reqparse.RequestParser()
 get_parser.add_argument(
     'reciever', required=True,
@@ -41,6 +39,7 @@ get_parser.add_argument(
     help='The end date to retrieve from'
 )
 
+#Request parser for delete route
 del_parser = reqparse.RequestParser()
 del_parser.add_argument(
     'reciever', required=True,
@@ -52,7 +51,9 @@ del_parser.add_argument(
     help='The ids of the messages to remove'
 )
 
+#Fields for a message objet
 message_fields = {
+    '_id': fields.String,
     'sender': fields.String,
     'reciever': fields.String,
     'message': fields.String,
@@ -60,6 +61,7 @@ message_fields = {
     'date_opened': fields.DateTime
 }
 
+#List of messages
 message_list_fields = {
     'new_messages': fields.List(fields.Nested(message_fields)),
 }
@@ -83,8 +85,8 @@ class Message(Resource):
 
     def delete(self):
         args = del_parser.parse_args()
-        del_messages(args.reciever, args.ids)
-        return
+        del_count = del_messages(args.reciever, args.ids)
+        return {"num_deleted": del_count}
 
 def create_message(sender, reciever, message):
     message = {"sender": sender, "reciever": reciever, "message": message, 'date_sent': datetime.now()}
@@ -100,12 +102,15 @@ def fetch_message_list(reciever, from_date=None, to_date=None):
     else:
         messages = db.messages.find({'reciever': reciever, 'date_opened':{'$exists':False}})
     messages.sort("date_sent", -1)
-    result = []
+    result = [] #Create a result array for the return data
     for message in messages:
-        result.append(message)
+        result.append(message) #Append to result array, messages will be empty after the update
         db.messages.update({'_id': message['_id']}, {'$set': {'date_opened': opened_date}})
+    for message in result:
+        message['_id'] = str(message['_id'])#Need to remap ObjectId to String so the id can be read in the response
     return {'new_messages': result}
 
 def del_messages(reciever, ids):
-    ids = list(map(lambda id: ObjectId(id),ids))
-    db.messages.delete_many({'reciever': reciever, '_id' : {'$in' : ids}})
+    ids = list(map(lambda id: ObjectId(id),ids)) #Need to remap the ids to ObjectId that mongo uses
+    res = db.messages.delete_many({'reciever': reciever, '_id' : {'$in' : ids}})
+    return res.deleted_count
